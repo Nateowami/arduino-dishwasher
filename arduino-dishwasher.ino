@@ -26,6 +26,12 @@ RBD::Button right(5);
 
 //configure pins for solenoids and pump
 const int solenoidAPin = 4, solenoidBPin = 3, pumpPin = 2;
+//use this to set the pump on and pump off delays
+const int pumpDelayOn = 5, pumpDelayOff = 10;//seconds
+
+//used internally to keep track of what state the pump is in
+boolean pumpState = LOW;
+elapsedMillis pumpMil; //automatically counts milliseconds
 
 boolean running = false; //stopped/waiting
 boolean paused = false;
@@ -51,9 +57,11 @@ void setup() {
 
 void loop() {
   if(left.onPressed()) {
+    Serial.println("left button");
     //if paused, the left button means stop
     if(paused) {
       resetState();
+      Serial.println("Stopping");
     }
     updateLCD();
   }
@@ -66,6 +74,7 @@ void loop() {
       option2 = "Pause";
       running = true;
       mil = 0;
+      pumpMil = 0;
     }
     updateLCD();
   }
@@ -78,6 +87,7 @@ void loop() {
       paused = true;
       option1 = "Stop";
       option2 = "Resume";
+      pumpMil = 0;
     }
     //when paused, the right button resumes
     else if(paused){
@@ -87,6 +97,7 @@ void loop() {
       option2 = "Pause";
       message = "Running";
       mil = 0;
+      pumpMil = 0;
     }
     Serial.println("Updating the LCD");
     updateLCD();
@@ -103,16 +114,24 @@ void loop() {
     //handle termination of cycle (i.e., when it finishes naturally)
     if(secondsLeft == 0){
       resetState();
+      pumpMil = 0;
       option1 = "Finished";
       updateLCD();
     }    
   }
 
+  boolean prevPumpState = pumpState;
+  //handle pump delay
+  if(running && !paused && pumpDelayOn * 1000 <= pumpMil) pumpState = HIGH;
+  //paused or stopped
+  else if(pumpDelayOff * 1000 <= pumpMil) pumpState = LOW;
+  if(prevPumpState != pumpState) Serial.println(pumpState == HIGH ? "Turned pump on" : "Turned pump off");
+
   //handle pump and solenoids
   uint8_t state = running && !paused ? HIGH : LOW;
   solenoidA(state);
   solenoidB(state);
-  pump(state);
+  pump(pumpState);
   
   delay(10);
 }
