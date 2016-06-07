@@ -26,15 +26,31 @@ RBD::Button right(5);
 
 //configure pins for solenoids and pump
 const int solenoidAPin = 4, solenoidBPin = 3, pumpPin = 2;
+boolean coldOn = false, hotOn = false;
 
 boolean running = false; //stopped/waiting
 boolean paused = false;
 
+//washing cycles
 String defaultInstructions = "Red btn to run";
 String message = "Waiting", option1 = defaultInstructions, option2 = "";
 int totalSeconds = 60*90; //seconds in a cycle
 int secondsLeft = 0; //seconds left in current cycle
 elapsedMillis mil; //automatically counts milliseconds
+
+//pump and water sensor
+const int minPumpTimeOn = 3000;
+elapsedMillis pumpTimeOn;
+boolean pumpOn = false;
+const int waterSensorPin = A0, waterSensorThreshold = 750;
+
+//thermistors
+const int solenoidAThermistorPin = A1, solenoidBThermistorPin = A2;
+//on a scale 0-100, which solenoid appears to be which?
+//if number is less than 50, assume solenoidA is cold, B is hot
+//otherwise assume the opposite
+//this keeps a wildly-off reading from switching the solenoids  
+byte tempScale = 49;
 
 void setup() {
   //set the LCD's dimensions
@@ -45,6 +61,11 @@ void setup() {
   pinMode(solenoidAPin, OUTPUT);
   pinMode(solenoidBPin, OUTPUT);
   pinMode(pumpPin, OUTPUT);
+
+  //set up input pins
+  pinMode(waterSensorPin, INPUT_PULLUP);
+  pinMode(solenoidAThermistorPin, INPUT_PULLUP);
+  pinMode(solenoidBThermistorPin, INPUT_PULLUP);
   
   Serial.begin(9600);
 }
@@ -65,6 +86,8 @@ void loop() {
       option1 = "";
       option2 = "Pause";
       running = true;
+      coldOn = true;
+      hotOn = true;
       mil = 0;
     }
     updateLCD();
@@ -105,16 +128,49 @@ void loop() {
       resetState();
       option1 = "Finished";
       updateLCD();
+      //TODO beep
     }    
   }
 
-  //handle pump and solenoids
-  uint8_t state = running && !paused ? HIGH : LOW;
-  solenoidA(state);
-  solenoidB(state);
-  pump(state);
+  //handle thermistors
+  int a = analogRead(solenoidAThermistorPin), b = analogRead(solenoidBThermistorPin);
+  //readings go lower when temperature increases
+  //if a is cold and b is hot
+  if(a > b){
+    //decrement the tempScale, but not lower than 0
+    if(tempScale > 0) tempScale--;
+  }
+  else if(tempScale < 100) tempScale++;
   
-  delay(10);
+  //handle solenoids
+  boolean aOn, bOn;
+  if(tempScale < 50){
+    aOn = coldOn, bOn = hotOn;
+  }
+  else {
+    aOn = hotOn, bOn = coldOn;
+  }
+  if(!running || paused) {
+    aOn = false, bOn = false;
+  }
+  solenoidA(aOn);
+  solenoidB(bOn);
+  
+  //handle water sensor and pump
+  //if the water sensor pin has been pulled low by current in the water
+  if(analogRead(waterSensorPin) < waterSensorThreshold){
+    if(!pumpOn){
+      pumpOn = true;
+      pumpTimeOn = 0;
+      pump(HIGH);
+    }
+  }
+  else if(pumpOn && pumpTimeOn >= minPumpTimeOn){
+    pumpOn = false;
+    pump(LOW);
+  }
+  
+  delay(1);
 }
 
 //reset state to default (as when a cycle finishes, or is stopped by the user)
