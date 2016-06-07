@@ -15,6 +15,7 @@
 #include <RBD_Button.h>
 #include <elapsedMillis.h>
 #include <LiquidCrystal.h>
+#include <CapacitiveSensor.h>
 
 // specify the pins the LCD is connected to
 LiquidCrystal lcd(13, 12, 11, 10, 9, 8);
@@ -36,10 +37,24 @@ int totalSeconds = 60*90; //seconds in a cycle
 int secondsLeft = 0; //seconds left in current cycle
 elapsedMillis mil; //automatically counts milliseconds
 
+//water detection
+CapacitiveSensor cs = CapacitiveSensor(A0, A1);
+const long waterThreshhold = 350;
+//minimum time pump will run (in milliseconds)
+const int minPumpTimeOn = 3000;
+elapsedMillis pumpTimeOn;
+boolean pumpOn = false;
+//array of bits showing how many readings of the last 16 were above 
+//the threshhold
+uint16_t waterReadings = 0;
+
 void setup() {
   //set the LCD's dimensions
   lcd.begin(16, 2);
   updateLCD();
+
+  //set a fast timeout for the capacitive sensor
+  cs.set_CS_Timeout_Millis(5);
 
   //set up solenoid and pump pins as outputs
   pinMode(solenoidAPin, OUTPUT);
@@ -108,13 +123,38 @@ void loop() {
     }    
   }
 
-  //handle pump and solenoids
+  //handle solenoids
   uint8_t state = running && !paused ? HIGH : LOW;
   solenoidA(state);
   solenoidB(state);
-  pump(state);
+
+  //handle water sensor and pump
+  long total = cs.capacitiveSensorRaw(10);
+  //bit shift to the left to throw away oldest readings
+  waterReadings << 1;
+  //set the last bit to 1 if the reading is above threshhold
+  if(total >= waterThreshhold || total == -2 /*-2 is timeout code*/) waterReadings += 1;
+  //find the sum of the bits in pumpReadings
+  byte highReadings = 0;
+  Serial.print(pumpOn);
+  Serial.println(total);
+  for(byte i = 0; i < 16; i++) {
+    highReadings += bitRead(waterReadings, i);
+  }
+  //change pump state if necessary
+  //otherwise leave as is
+  if(pumpOn) {
+    if(pumpTimeOn >= minPumpTimeOn && highReadings <= 4){
+      pump(LOW);
+      pumpOn = false;
+    }
+  }
+  else if(highReadings >= 8){
+    pump(HIGH);
+    pumpOn = true;
+    pumpTimeOn = 0;
+  }
   
-  delay(10);
 }
 
 //reset state to default (as when a cycle finishes, or is stopped by the user)
