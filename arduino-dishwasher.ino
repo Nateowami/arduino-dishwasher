@@ -34,7 +34,7 @@ boolean paused = false;
 //washing cycles
 String defaultInstructions = "Red btn to run";
 String message = "Waiting", option1 = defaultInstructions, option2 = "";
-int totalSeconds = 60*90; //seconds in a cycle
+const int totalSeconds = 60*90; //seconds in a cycle
 int secondsLeft = 0; //seconds left in current cycle
 elapsedMillis mil; //automatically counts milliseconds
 
@@ -52,15 +52,22 @@ const int solenoidAThermistorPin = A1, solenoidBThermistorPin = A2;
 //this keeps a wildly-off reading from switching the solenoids  
 byte tempScale = 49;
 
+//piezo beeper
+const int piezoPin = A3, piezoHz = 500, piezoBeeps = 10, piezoBeepLength = 500, piezoPauseLength = 250;
+boolean piezoBeeping = false, piezoPaused = false;
+int piezoBeepsSoFar = 0;
+elapsedMillis piezoTimer;
+
 void setup() {
   //set the LCD's dimensions
   lcd.begin(16, 2);
   updateLCD();
 
-  //set up solenoid and pump pins as outputs
+  //set up solenoid, piezo, and pump pins as outputs
   pinMode(solenoidAPin, OUTPUT);
   pinMode(solenoidBPin, OUTPUT);
   pinMode(pumpPin, OUTPUT);
+  pinMode(piezoPin, OUTPUT);
 
   //set up input pins
   pinMode(waterSensorPin, INPUT_PULLUP);
@@ -93,10 +100,8 @@ void loop() {
     updateLCD();
   }
   if(right.onPressed()){
-    Serial.println("Right btn pressed");
     //when running, the right button pauses
     if(running && !paused){
-      Serial.println("pausing");
       message = "Paused";
       paused = true;
       option1 = "Stop";
@@ -104,14 +109,12 @@ void loop() {
     }
     //when paused, the right button resumes
     else if(paused){
-      Serial.println("resuming");
       paused = false;
       option1 = "";
       option2 = "Pause";
       message = "Running";
       mil = 0;
     }
-    Serial.println("Updating the LCD");
     updateLCD();
   }
 
@@ -128,7 +131,8 @@ void loop() {
       resetState();
       option1 = "Finished";
       updateLCD();
-      //TODO beep
+      piezoBeeping = true;
+      piezoTimer = 0;
     }    
   }
 
@@ -136,11 +140,9 @@ void loop() {
   int a = analogRead(solenoidAThermistorPin), b = analogRead(solenoidBThermistorPin);
   //readings go lower when temperature increases
   //if a is cold and b is hot
-  if(a > b){
-    //decrement the tempScale, but not lower than 0
-    if(tempScale > 0) tempScale--;
-  }
-  else if(tempScale < 100) tempScale++;
+  if(a > b) tempScale--;
+  else tempScale++;
+  tempScale = constrain(tempScale, 0, 100);
   
   //handle solenoids
   boolean aOn, bOn;
@@ -168,6 +170,29 @@ void loop() {
   else if(pumpOn && pumpTimeOn >= minPumpTimeOn){
     pumpOn = false;
     pump(LOW);
+  }
+
+  //handle the piezo
+  if(piezoBeeping){
+    //start by checking if we're at the end or beginning of a beep
+    if(!piezoPaused && piezoTimer >= piezoBeepLength || piezoPaused && piezoTimer >= piezoPauseLength) {
+      if(!piezoPaused) piezoBeepsSoFar++;
+      piezoPaused = !piezoPaused;
+      piezoTimer = 0;
+    }
+    
+    if(piezoBeepsSoFar >= piezoBeeps) {
+      piezoBeeping = false;
+      piezoBeepsSoFar = 0;
+      noTone(piezoPin);
+    }
+    else if(piezoPaused){
+      noTone(piezoPin);
+    }
+    //in a beep
+    else {
+      tone(piezoPin, piezoHz);
+    }
   }
   
   delay(1);
@@ -215,7 +240,7 @@ void updateLCD(){
   lcd.print(option2);
 }
 
-// functions below turn the solenoids and pump on and off
+// functions below turn the solenoids, piezo, and pump on and off
 
 void solenoidA(uint8_t state){
   digitalWrite(solenoidAPin, state);
@@ -227,5 +252,9 @@ void solenoidB(uint8_t state){
 
 void pump(uint8_t state){
   digitalWrite(pumpPin, state);
+}
+
+void piezo(uint8_t state) {
+  digitalWrite(piezoPin, state);
 }
 
